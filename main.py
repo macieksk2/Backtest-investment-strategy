@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sat Jan 16 21:31:14 2021
-
 @author: maciej_sliz
 """
 # Import packages
@@ -42,9 +40,9 @@ share_bond_sold_when_incr_stock = 1.0
 # Share of stocks sold when increasing bonds position
 share_stock_sold_when_incr_bond = 0.0
 # Share of stocks sold when decreasing stocks position
-share_stock_sold_when_decr_stock = 1.0
+share_stock_bought_when_decr_bond = 1.0
 # Share of bonds sold when decreasing bonds position
-share_bond_sold_when_decr_stock = 1.0
+share_bond_bought_when_decr_stock = 1.0
 # Shorter term MA window (in trading days)
 short_MA = 30
 # Longer term MA window (in trading days)
@@ -74,11 +72,11 @@ transactions_values = pd.DataFrame(0.0, index=historicals['Date'], columns=['Sto
 for n in range(len(historicals)):
     # Check if date is after the starting date
     if historicals.iloc[n]["Date"] >= first_day_backtest:
-        # Calcaulte short term MA - DJ
+        # Calculate short term MA - DJ
         MA.iloc[n]["DJ short"] = np.mean(historicals.iloc[range(n-short_MA+1,n+1)]["DOW JONES COMPOSITE"].astype(float)) 
         # Calculate long term MA - DJ
         MA.iloc[n]["DJ long"] = np.mean(historicals.iloc[range(n-long_MA+1,n+1)]["DOW JONES COMPOSITE"].astype(float))      
-        # Calcaulte short term MA - TLT
+        # Calculate short term MA - TLT
         MA.iloc[n]["Bond short"] = np.mean(historicals.iloc[range(n-short_MA+1,n+1)]["TLT 20Y"].astype(float))        
         # Calculate long term MA - TLT
         MA.iloc[n]["Bond long"] = np.mean(historicals.iloc[range(n-long_MA+1,n+1)]["TLT 20Y"].astype(float))            
@@ -87,11 +85,11 @@ for n in range(len(historicals)):
     if historicals.iloc[n]["Date"] > first_day_backtest:  
         # Has short term MA crossed long term MA?
         # Has it crossed it from below? -> BUY MORE DJ
-        # Has DJ/TLT crossed lower bound? -> BUY MORE DJ
+        # Has DJ/TLT crossed lower bound from above? -> BUY MORE DJ
         if (MA.iloc[n]["DJ short"] > MA.iloc[n]["DJ long"] and MA.iloc[n-1]["DJ short"] < MA.iloc[n-1]["DJ long"]) or (MA.iloc[n]["DJ/TLT"] <= lower_DJ_TLT * 100 and MA.iloc[n-1]["DJ/TLT"] > lower_DJ_TLT * 100):
             transactions.iloc[n]['Stocks'] = 1
         # Has it crossed it from above? -> SELL MORE DJ 
-        # Has DJ/TLT crossed upper bound? -> SELL MORE DJ 
+        # Has DJ/TLT crossed upper bound from below? -> SELL MORE DJ 
         elif (MA.iloc[n]["DJ short"] < MA.iloc[n]["DJ long"] and MA.iloc[n-1]["DJ short"] > MA.iloc[n-1]["DJ long"]) or (MA.iloc[n]["DJ/TLT"] >= upper_DJ_TLT * 100 and MA.iloc[n-1]["DJ/TLT"] < upper_DJ_TLT * 100):
             transactions.iloc[n]['Stocks'] = -1
         else:
@@ -106,7 +104,7 @@ for n in range(len(historicals)):
         else:
             transactions.iloc[n]['Bonds'] = 0
         
-        # If the transaction is to be done, check if enough time passed from the last trade
+        # If the transaction is to be done, check if enough time passed from the last trade by verifing if both minimum and maximum of the transactions are equal to 0
         if transactions.iloc[n]['Stocks'] == 1 and np.min(transactions.iloc[range(n-min_time_rebalance,n)]["Stocks"].astype(float)) == 0 and np.max(transactions.iloc[range(n-min_time_rebalance,n)]["Stocks"].astype(float)) == 0:
             transactions.iloc[n]['Stocks'] == 1
         elif transactions.iloc[n]['Stocks'] == -1 and np.min(transactions.iloc[range(n-min_time_rebalance,n)]["Stocks"].astype(float)) == 0 and np.max(transactions.iloc[range(n-min_time_rebalance,n)]["Stocks"].astype(float)) == 0:
@@ -128,24 +126,36 @@ for n in range(len(historicals)):
         portfolio.iloc[n]['Bonds'] = starting_value * starting_bond_share * (1 - bond_chrg)
         portfolio.iloc[n]["Portfolio"] = portfolio.iloc[n]['Stocks'] + portfolio.iloc[n]['Bonds']
         transactions_values.iloc[n]['Stocks'] = 0
-        transactions_values.iloc[n]['Bonds'] = 0      
+        transactions_values.iloc[n]['Bonds'] = 0 
+    # In case of purchasing stocks, the value fo the trade is equal to:
+    # Value of shares purchased(t) = Value of bonds(t-1) * Value of Bond Index(t) / Value of Bond Index(t-1) * Share of bonds traded * (1-bond charge) * (1-equity charge)
+    # Value of bonds sold(t) = - Value of bonds(t-1) * Value of Bond Index(t) / Value of Bond Index(t-1) * Share of bonds traded * (1-bond charge)
     elif transactions.iloc[n]['Stocks'] == 1:
         transactions_values.iloc[n]['Stocks'] = portfolio.iloc[n-1]['Bonds'] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) * share_bond_sold_when_incr_stock * (1 - eq_chrg) * (1 - bond_chrg)
         transactions_values.iloc[n]['Bonds'] = -portfolio.iloc[n-1]['Bonds'] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) * share_bond_sold_when_incr_stock * (1 - bond_chrg)
+    # In case of selling stocks, the value fo the trade is equal to:
+    # Value of bonds purchased(t) = Value of stocks(t-1) * Value of Equity Index(t) / Value of Equity Index(t-1) * Share of stocks traded * (1-bond charge) * (1-equity charge)
+    # Value of shares sold(t) = - Value of stocks(t-1) * Value of Equity Index(t) / Value of Equity Index(t-1) * Share of stocks traded * (1-equity charge)
     elif transactions.iloc[n]['Stocks'] == -1:
-        transactions_values.iloc[n]['Stocks'] = -portfolio.iloc[n-1]['Stocks'] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) * share_bond_sold_when_decr_stock * (1 - eq_chrg) 
-        transactions_values.iloc[n]['Bonds'] = portfolio.iloc[n-1]['Stocks'] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) * share_bond_sold_when_decr_stock * (1 - eq_chrg) * (1 - bond_chrg)
+        transactions_values.iloc[n]['Stocks'] = -portfolio.iloc[n-1]['Stocks'] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) * share_bond_bought_when_decr_stock * (1 - eq_chrg) 
+        transactions_values.iloc[n]['Bonds'] = portfolio.iloc[n-1]['Stocks'] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) * share_bond_bought_when_decr_stock * (1 - eq_chrg) * (1 - bond_chrg)
+    # In case of selling bonds, the value fo the trade is equal to:
+    # Value of bonds sold(t) = -Value of Bonds(t-1) * Value of Bond Index(t) / Value of Bond Index(t-1) * Share of bonds traded * (1-bond charge)
+    # Value of shares purchased(t) = Value of Bonds(t-1) * Value of Bond Index(t) / Value of Bond Index(t-1) * Share of bonds traded * (1-bond charge) * (1-equity charge)
     elif transactions.iloc[n]['Bonds'] == -1:
-        transactions_values.iloc[n]['Stocks'] = portfolio.iloc[n-1]['Bonds'] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) * share_stock_sold_when_decr_stock * (1 - eq_chrg) * (1 - bond_chrg)
-        transactions_values.iloc[n]['Bonds'] = -portfolio.iloc[n-1]['Bonds'] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) * share_stock_sold_when_decr_stock * (1 - bond_chrg)               
+        transactions_values.iloc[n]['Stocks'] = portfolio.iloc[n-1]['Bonds'] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) * share_bought_sold_when_decr_bond * (1 - eq_chrg) * (1 - bond_chrg)
+        transactions_values.iloc[n]['Bonds'] = -portfolio.iloc[n-1]['Bonds'] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) * share_bought_sold_when_decr_bond * (1 - bond_chrg)               
+    # In case of buying bonds, the value fo the trade is equal to:
+    # Value of bonds bought(t) = Value of stocks(t-1) * Value of Equity Index(t) / Value of Equity Index(t-1) * Share of stocks traded * (1-bond charge) * (1-equity charge)
+    # Value of shares purchased(t) = -Value of stocks(t-1) * Value of Equity Index(t) / Value of Equity Index(t-1) * Share of stocks traded * (1-equity charge)
     elif transactions.iloc[n]['Bonds'] == 1:
         transactions_values.iloc[n]['Stocks'] = -portfolio.iloc[n-1]['Stocks'] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) * share_stock_sold_when_incr_bond * (1 - eq_chrg) 
         transactions_values.iloc[n]['Bonds'] = portfolio.iloc[n-1]['Stocks'] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) * share_stock_sold_when_incr_bond * (1 - eq_chrg) * (1 - bond_chrg)       
     
     if historicals.iloc[n]["Date"] > first_day_backtest: 
-        # Calculate the value of shares in portfolio
+        # Calculate the value of shares in portfolio (update the value of stocks from previous period and new transaction)
         portfolio.iloc[n]["Stocks"] = portfolio.iloc[n-1]["Stocks"] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) + transactions_values.iloc[n]['Stocks']
-        # Calculate the value of bnods in portfolio
+        # Calculate the value of bonds in portfolio (update the value of bonds from previous period and new transaction)
         portfolio.iloc[n]["Bonds"] = portfolio.iloc[n-1]["Bonds"] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) + transactions_values.iloc[n]['Bonds']
         # Total portfolio
         portfolio.iloc[n]["Portfolio"] = portfolio.iloc[n]["Stocks"] + portfolio.iloc[n]["Bonds"]
