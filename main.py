@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-V2:
-- Transfer most of the code from for loop to list comprehension
+V3:
+- Move most of the calculations to newly defined functions (file investment_backtesting_functions.py)
+- Create plots of Portfolio evolution, changes between Stocks and Bonds allocaiton, comaprison of evolution of Dowj Jones Index and TLT 20Y fund
 
+@author: maciej_sliz
 """
 # Import packages
 import os
@@ -12,11 +14,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 
-# CHECK TIME RUNNING
+# Start timing
 start_time = time.time()
 
 # Change path
-os.chdir(r"...\Investment strategy backtesting\v2")
+os.chdir(r"...\Investment strategy backtesting\v3")
 
 ########################################################################
 # INPUT
@@ -62,7 +64,7 @@ upper_DJ_TLT = 0.7
 lower_DJ_TLT = 0.4
 
 ########################################################################
-# CALCULATION:
+# INITIALIZATION:
 ########################################################################
 
 # Calculate first day of backtesting based on the length of longer term MA
@@ -78,40 +80,48 @@ transactions = pd.DataFrame(0.0, index=historicals['Date'], columns=['Stocks','B
 # Define the array with value of transactions
 transactions_values = pd.DataFrame(0.0, index=historicals['Date'], columns=['Stocks','Bonds'])
 
-# Iterate through all historical dates
+########################################################################
+# FUNCTIONS:
+########################################################################
+from investment_backtesting_functions import *
+
+########################################################################
+# CALCULATION:
+########################################################################
+    
 # Check if date is after the starting date
 # Calculate short term MA - DJ
-MA[(short_MA-1):]["DJ short"] = np.convolve(historicals["DOW JONES COMPOSITE"].astype(float), np.ones(short_MA)/short_MA, mode='valid')
+MA[(short_MA-1):]["DJ short"] = moving_average(historicals["DOW JONES COMPOSITE"], short_MA, float)
 # Calculate long term MA - DJ
-MA[(long_MA-1):]["DJ long"] = np.convolve(historicals["DOW JONES COMPOSITE"].astype(float), np.ones(long_MA)/long_MA, mode='valid')
+MA[(long_MA-1):]["DJ long"] = moving_average(historicals["DOW JONES COMPOSITE"], long_MA, float)
 # Calculate short term MA - TLT
-MA[(short_MA-1):]["Bond short"] = np.convolve(historicals["TLT 20Y"].astype(float), np.ones(short_MA)/short_MA, mode='valid')
+MA[(short_MA-1):]["Bond short"] = moving_average(historicals["TLT 20Y"], short_MA, float)
 # Calculate long term MA - TLT
-MA[(long_MA-1):]["Bond long"] = np.convolve(historicals["TLT 20Y"].astype(float), np.ones(long_MA)/long_MA, mode='valid')
+MA[(long_MA-1):]["Bond long"] = moving_average(historicals["TLT 20Y"], long_MA, float)
 # Calculate DJ/TLT ratio, check whether stock price and TLT index are within the bounds
 MA["DJ/TLT"] = np.array(historicals["DOW JONES COMPOSITE"] / historicals["TLT 20Y"])    
 
-# Add to MA dataframe columns check if short term MA are above long term MA (DJ or Bond indices)
-MA["DJ short > DJ long"] = MA[(long_MA-1):]["DJ short"] > MA[(long_MA-1):]["DJ long"]
-MA["DJ short < DJ long"] = MA[(long_MA-1):]["DJ short"] < MA[(long_MA-1):]["DJ long"]
-MA["Bond short > Bond long"] = MA[(long_MA-1):]["Bond short"] > MA[(long_MA-1):]["Bond long"]
-MA["Bond short < Bond long"] = MA[(long_MA-1):]["Bond short"] < MA[(long_MA-1):]["Bond long"]
+# Add to MA dataframe columns checking if short term MA is above long term MA (DJ or Bond indices)
+MA["DJ short > DJ long"] = compare_series(MA,"DJ short","DJ long", long_MA, ">", flag = 1)
+MA["DJ short < DJ long"] = compare_series(MA,"DJ short","DJ long", long_MA, "<", flag = 1)
+MA["Bond short > Bond long"] = compare_series(MA,"Bond short","Bond long", long_MA, ">", flag = 1)
+MA["Bond short < Bond long"] = compare_series(MA,"Bond short","Bond long", long_MA, "<", flag = 1)
 
-# Add to MA dataframe products of vectors with their lags
+# Add to MA dataframe differences of vectors with their lags
 # 1 - TRUE
 # else - FALSE
-MA["DJ short > DJ long & DJ short.L1 < DJ long.L1"] = MA[(long_MA-1):]["DJ short > DJ long"] - MA[(long_MA-1):]["DJ short > DJ long"].shift(1)
-MA["DJ short < DJ long & DJ short.L1 > DJ long.L1"] = MA[(long_MA-1):]["DJ short < DJ long"] - MA[(long_MA-1):]["DJ short < DJ long"].shift(1)
-MA["Bond short > Bond long & Bond short.L1 < Bond long.L1"] = MA[(long_MA-1):]["Bond short > Bond long"] - MA[(long_MA-1):]["Bond short > Bond long"].shift(1)
-MA["Bond short < Bond long & Bond short.L1 > Bond long.L1"] = MA[(long_MA-1):]["Bond short < Bond long"] - MA[(long_MA-1):]["Bond short < Bond long"].shift(1)
+MA["DJ short > DJ long & DJ short.L1 < DJ long.L1"] = series_difference(MA, "DJ short > DJ long", long_MA, 1) 
+MA["DJ short < DJ long & DJ short.L1 > DJ long.L1"] = series_difference(MA, "DJ short < DJ long", long_MA, 1) 
+MA["Bond short > Bond long & Bond short.L1 < Bond long.L1"] = series_difference(MA, "Bond short > Bond long", long_MA, 1) 
+MA["Bond short < Bond long & Bond short.L1 > Bond long.L1"] = series_difference(MA, "Bond short < Bond long", long_MA, 1)
 
 # Add to MA dataframe vector checking whether DJ/TLT crossed lower/upper bound in specific period
 # -1 - TRUE
 # else - FALSE
-MA["DJ/TLT < lower bound"] = MA["DJ/TLT"] < lower_DJ_TLT * 100
-MA["DJ/TLT > upper bound"] = MA["DJ/TLT"] < upper_DJ_TLT * 100
-MA["DJ/TLT < lower limit & DJ/TLT.L1 > lower limit"] = MA[(long_MA-1):]["DJ/TLT < lower bound"] - MA[(long_MA-1):]["DJ/TLT < lower bound"].shift(1)
-MA["DJ/TLT > upper limit & DJ/TLT.L1 < upper limit"] = MA[(long_MA-1):]["DJ/TLT > upper bound"] - MA[(long_MA-1):]["DJ/TLT > upper bound"].shift(1)
+MA["DJ/TLT < lower bound"] = compare_series(MA,"DJ/TLT", sign = "<", flag = 2, constant_val = lower_DJ_TLT * 100)
+MA["DJ/TLT > upper bound"] = compare_series(MA,"DJ/TLT", sign = "<", flag = 2, constant_val = upper_DJ_TLT * 100)
+MA["DJ/TLT < lower limit & DJ/TLT.L1 > lower limit"] = series_difference(MA, "DJ/TLT < lower bound", long_MA, 1)
+MA["DJ/TLT > upper limit & DJ/TLT.L1 < upper limit"] = series_difference(MA, "DJ/TLT > upper bound", long_MA, 1)
 
 # Replace NaN with zeros
 MA = MA.fillna(0)
@@ -119,28 +129,28 @@ MA = MA.fillna(0)
 # Has short term MA crossed long term MA?
 # Has it crossed it from below? -> BUY MORE DJ
 # Has DJ/TLT crossed lower bound? -> BUY MORE DJ
-transactions['Stocks'] = [1.0 if MA.iloc[n]["DJ short > DJ long & DJ short.L1 < DJ long.L1"] == 1 or MA.iloc[n]["DJ/TLT < lower limit & DJ/TLT.L1 > lower limit"] == 1 else 0.0 for n in range(len(historicals))]
 # Has it crossed it from above? -> SELL MORE DJ 
 # Has DJ/TLT crossed upper bound? -> SELL MORE DJ 
-transactions['Stocks'] = [-1.0 if MA.iloc[n]["DJ short < DJ long & DJ short.L1 > DJ long.L1"] == 1 or MA.iloc[n]["DJ/TLT > upper limit & DJ/TLT.L1 < upper limit"] == -1 else transactions.iloc[n]['Stocks'] for n in range(len(historicals)) ]
+transactions['Stocks'] = transaction(MA, "Stocks", 
+                                     buy_col_name_1 = "DJ short > DJ long & DJ short.L1 < DJ long.L1", 
+                                     buy_col_name_2 = "DJ/TLT < lower limit & DJ/TLT.L1 > lower limit", 
+                                     sell_col_name_1 ="DJ short < DJ long & DJ short.L1 > DJ long.L1", 
+                                     sell_col_name_2 = "DJ/TLT > upper limit & DJ/TLT.L1 < upper limit") 
 # Bonds
-transactions['Bonds'] = [1.0 if MA.iloc[n]["Bond short > Bond long & Bond short.L1 < Bond long.L1"] == 1 else 0.0 for n in range(len(historicals)) ]
+# Has it crossed it from below? -> BUY MORE TLT
 # Has it crossed it from above? -> SELL MORE TLT 
-transactions['Bonds'] = [-1.0 if MA.iloc[n]["Bond short < Bond long & Bond short.L1 > Bond long.L1"] == 1 else transactions.iloc[n]['Bonds'] for n in range(len(historicals)) ]
+transactions['Bonds'] = transaction(MA, "Bonds", 
+                                    buy_col_name_1 = "Bond short > Bond long & Bond short.L1 < Bond long.L1", 
+                                    sell_col_name_1 = "Bond short < Bond long & Bond short.L1 > Bond long.L1")
 
 # # If the transaction is to be done, check if enough time passed from the last trade
-transactions['Stocks'] = [1.0 if transactions.iloc[n]['Stocks'] == 1 and np.min(transactions.iloc[range(n-min_time_rebalance,n)]["Stocks"].astype(float)) == 0 and np.max(transactions.iloc[range(n-min_time_rebalance,n)]["Stocks"].astype(float)) == 0 
-                          else -1.0 if transactions.iloc[n]['Stocks'] == -1 and np.min(transactions.iloc[range(n-min_time_rebalance,n)]["Stocks"].astype(float)) == 0 and np.max(transactions.iloc[range(n-min_time_rebalance,n)]["Stocks"].astype(float)) == 0 
-                          else 0.0 for n in range(len(historicals))]
-
-transactions['Bonds'] = [1.0 if transactions.iloc[n]['Bonds'] == 1 and np.min(transactions.iloc[range(n-min_time_rebalance,n)]["Bonds"].astype(float)) == 0 and np.max(transactions.iloc[range(n-min_time_rebalance,n)]["Bonds"].astype(float)) == 0 
-                          else -1.0 if transactions.iloc[n]['Bonds'] == -1 and np.min(transactions.iloc[range(n-min_time_rebalance,n)]["Bonds"].astype(float)) == 0 and np.max(transactions.iloc[range(n-min_time_rebalance,n)]["Bonds"].astype(float)) == 0 
-                          else 0.0 for n in range(len(historicals))]
+transactions['Stocks'] = check_time_passed(transactions, "Stocks", min_time = min_time_rebalance)
+transactions['Bonds'] = check_time_passed(transactions, "Bonds", min_time = min_time_rebalance)
 
 # Iterate through all historical dates
 for n in range(len(historicals)):   
       
-    # Calculate the value of stocks / bonds traded
+    # Calculate the value of stocks / No documbonds traded
     # At first day, initialize portfolio
     if historicals.iloc[n]["Date"] == first_day_backtest: 
         portfolio.iloc[n]['Stocks'] = starting_value * starting_equity_share * (1 - eq_chrg)
@@ -149,23 +159,23 @@ for n in range(len(historicals)):
         transactions_values.iloc[n]['Stocks'] = 0
         transactions_values.iloc[n]['Bonds'] = 0      
     elif transactions.iloc[n]['Stocks'] == 1:
-        transactions_values.iloc[n]['Stocks'] = portfolio.iloc[n-1]['Bonds'] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) * share_bond_sold_when_incr_stock * (1 - eq_chrg) * (1 - bond_chrg)
-        transactions_values.iloc[n]['Bonds'] = -portfolio.iloc[n-1]['Bonds'] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) * share_bond_sold_when_incr_stock * (1 - bond_chrg)
+        transactions_values.iloc[n]['Stocks'] = value_asset(portfolio, historicals, n, "Bonds", "TLT 20Y") * share_bond_sold_when_incr_stock * (1 - eq_chrg) * (1 - bond_chrg)
+        transactions_values.iloc[n]['Bonds'] = -value_asset(portfolio, historicals, n, "Bonds", "TLT 20Y") * share_bond_sold_when_incr_stock * (1 - bond_chrg)
     elif transactions.iloc[n]['Stocks'] == -1:
-        transactions_values.iloc[n]['Stocks'] = -portfolio.iloc[n-1]['Stocks'] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) * share_bond_sold_when_decr_stock * (1 - eq_chrg) 
-        transactions_values.iloc[n]['Bonds'] = portfolio.iloc[n-1]['Stocks'] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) * share_bond_sold_when_decr_stock * (1 - eq_chrg) * (1 - bond_chrg)
+        transactions_values.iloc[n]['Stocks'] = -value_asset(portfolio, historicals, n, "Stocks", "DOW JONES COMPOSITE") * share_bond_sold_when_decr_stock * (1 - eq_chrg) 
+        transactions_values.iloc[n]['Bonds'] = value_asset(portfolio, historicals, n, "Stocks", "DOW JONES COMPOSITE") * share_bond_sold_when_decr_stock * (1 - eq_chrg) * (1 - bond_chrg)
     elif transactions.iloc[n]['Bonds'] == -1:
-        transactions_values.iloc[n]['Stocks'] = portfolio.iloc[n-1]['Bonds'] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) * share_stock_sold_when_decr_stock * (1 - eq_chrg) * (1 - bond_chrg)
-        transactions_values.iloc[n]['Bonds'] = -portfolio.iloc[n-1]['Bonds'] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) * share_stock_sold_when_decr_stock * (1 - bond_chrg)               
+        transactions_values.iloc[n]['Stocks'] = value_asset(portfolio, historicals, n, "Bonds", "TLT 20Y") * share_stock_sold_when_decr_stock * (1 - eq_chrg) * (1 - bond_chrg)
+        transactions_values.iloc[n]['Bonds'] = -value_asset(portfolio, historicals, n, "Bonds", "TLT 20Y") * share_stock_sold_when_decr_stock * (1 - bond_chrg)               
     elif transactions.iloc[n]['Bonds'] == 1:
-        transactions_values.iloc[n]['Stocks'] = -portfolio.iloc[n-1]['Stocks'] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) * share_stock_sold_when_incr_bond * (1 - eq_chrg) 
-        transactions_values.iloc[n]['Bonds'] = portfolio.iloc[n-1]['Stocks'] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) * share_stock_sold_when_incr_bond * (1 - eq_chrg) * (1 - bond_chrg)       
+        transactions_values.iloc[n]['Stocks'] = -value_asset(portfolio, historicals, n, "Stocks", "DOW JONES COMPOSITE") * share_stock_sold_when_incr_bond * (1 - eq_chrg) 
+        transactions_values.iloc[n]['Bonds'] = value_asset(portfolio, historicals, n, "Stocks", "DOW JONES COMPOSITE") * share_stock_sold_when_incr_bond * (1 - eq_chrg) * (1 - bond_chrg)       
     
     if historicals.iloc[n]["Date"] > first_day_backtest: 
         # Calculate the value of shares in portfolio
-        portfolio.iloc[n]["Stocks"] = portfolio.iloc[n-1]["Stocks"] * np.float(historicals.iloc[n]["DOW JONES COMPOSITE"]) / np.float(historicals.iloc[n-1]["DOW JONES COMPOSITE"]) + transactions_values.iloc[n]['Stocks']
+        portfolio.iloc[n]["Stocks"] = value_asset(portfolio, historicals, n, "Stocks", "DOW JONES COMPOSITE") + transactions_values.iloc[n]['Stocks']
         # Calculate the value of bnods in portfolio
-        portfolio.iloc[n]["Bonds"] = portfolio.iloc[n-1]["Bonds"] * np.float(historicals.iloc[n]["TLT 20Y"]) / np.float(historicals.iloc[n-1]["TLT 20Y"]) + transactions_values.iloc[n]['Bonds']
+        portfolio.iloc[n]["Bonds"] = value_asset(portfolio, historicals, n, "Bonds", "TLT 20Y") + transactions_values.iloc[n]['Bonds']
         # Total portfolio
         portfolio.iloc[n]["Portfolio"] = portfolio.iloc[n]["Stocks"] + portfolio.iloc[n]["Bonds"]
         
@@ -176,28 +186,41 @@ for n in range(len(historicals)):
 # OUTPUT TIME RUNNING
 print("--- %s seconds ---" % (time.time() - start_time))
 
+########################################################################
+# PLOTTING:
+########################################################################
+
 # Plot historical portfolio
 portfolio["Portfolio"].plot(kind='line')
+portfolio["Stocks"].plot(kind='line')
+portfolio["Bonds"].plot(kind='line')
+plt.legend(['Portfolio', 'Stocks', 'Bonds']);
 plt.show()
 
-# Plot DJ and TLT in one plot
-fig, ax1 = plt.subplots()
-
-color = 'tab:red'
-ax1.set_xlabel('Date')
-ax1.set_ylabel('Dow Jones', color=color)
-ax1.plot(historicals["Date"], historicals["DOW JONES COMPOSITE"], color=color)
-ax1.tick_params(axis='y', labelcolor=color)
-
-ax2 = ax1.twinx() # instantiate a second axes that shares the same x-axis
-
-color = 'tab:blue'
-ax2.set_ylabel('TLT', color=color)  # we already handled the x-label with ax1
-ax2.plot(historicals["Date"], historicals["TLT 20Y"], color=color)
-ax2.tick_params(axis='y', labelcolor=color)
-
-fig.tight_layout() # otherwise the right y-label is slightly clipped
+# Plot the transactions in time
+transactions["Stocks"].plot(kind='line')
+transactions["Bonds"].plot(kind='line')
+plt.legend(['Stocks', 'Bonds']);
 plt.show()
+
+# Plot the transactions values in time
+transactions_values["Stocks"].plot(kind='line')
+transactions_values["Bonds"].plot(kind='line')
+plt.legend(['Stocks', 'Bonds']);
+plt.show()
+
+# Plot the DJ vs TLT (normalized) in one plot
+rescaled_DJ =  (historicals["DOW JONES COMPOSITE"] - np.mean(historicals["DOW JONES COMPOSITE"])) / np.std(historicals["DOW JONES COMPOSITE"])
+rescaled_TLT = (historicals["TLT 20Y"] - np.mean(historicals["TLT 20Y"])) / np.std(historicals["TLT 20Y"])
+
+rescaled_DJ.plot(kind='line')
+rescaled_TLT.plot(kind='line')
+plt.legend(['DJ', 'TLT 20Y']);
+plt.show()
+
+########################################################################
+# VALIDATION:
+########################################################################
 
 # Save variables to file
 file = open("dump_transactions.txt", "w")
